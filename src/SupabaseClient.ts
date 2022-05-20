@@ -7,12 +7,6 @@ import { SupabaseStorageClient } from '@supabase/storage-js'
 import { FunctionsClient } from '@supabase/functions-js'
 import { PostgrestClient } from '@supabase/postgrest-js'
 import { AuthChangeEvent } from '@supabase/gotrue-js'
-import {
-  RealtimeClient,
-  RealtimeSubscription,
-  RealtimeClientOptions,
-  RealtimeChannel,
-} from '@supabase/realtime-js'
 
 const DEFAULT_OPTIONS = {
   schema: 'public',
@@ -36,11 +30,9 @@ export default class SupabaseClient {
 
   protected schema: string
   protected restUrl: string
-  protected realtimeUrl: string
   protected authUrl: string
   protected storageUrl: string
   protected functionsUrl: string
-  protected realtime: RealtimeClient
   protected multiTab: boolean
   protected fetch?: Fetch
   protected changedAccessToken: string | undefined
@@ -59,7 +51,6 @@ export default class SupabaseClient {
    * @param options.persistSession Set to "true" if you want to automatically save the user session into local storage.
    * @param options.detectSessionInUrl Set to "true" if you want to automatically detects OAuth grants in the URL and signs in the user.
    * @param options.headers Any additional headers to send with each network request.
-   * @param options.realtime Options passed along to realtime-js constructor.
    * @param options.multiTab Set to "false" if you want to disable multi-tab/window events.
    * @param options.fetch A custom fetch implementation.
    */
@@ -75,7 +66,6 @@ export default class SupabaseClient {
     const settings = { ...DEFAULT_OPTIONS, ...options }
 
     this.restUrl = `${_supabaseUrl}/rest/v1`
-    this.realtimeUrl = `${_supabaseUrl}/realtime/v1`.replace('http', 'ws')
     this.authUrl = `${_supabaseUrl}/auth/v1`
     this.storageUrl = `${_supabaseUrl}/storage/v1`
 
@@ -94,15 +84,9 @@ export default class SupabaseClient {
     this.shouldThrowOnError = settings.shouldThrowOnError || false
 
     this.auth = this._initSupabaseAuthClient(settings)
-    this.realtime = this._initRealtimeClient({ headers: this.headers, ...settings.realtime })
 
     this._listenForAuthEvents()
     this._listenForMultiTabEvents()
-
-    // In the future we might allow the user to pass in a logger to receive these events.
-    // this.realtime.onOpen(() => console.log('OPEN'))
-    // this.realtime.onClose(() => console.log('CLOSED'))
-    // this.realtime.onError((e: Error) => console.log('Socket error', e))
   }
 
   /**
@@ -132,7 +116,6 @@ export default class SupabaseClient {
     return new SupabaseQueryBuilder<T>(url, {
       headers: this._getAuthHeaders(),
       schema: this.schema,
-      realtime: this.realtime,
       table,
       fetch: this.fetch,
       shouldThrowOnError: this.shouldThrowOnError,
@@ -160,107 +143,6 @@ export default class SupabaseClient {
     return rest.rpc<T>(fn, params, { head, count })
   }
 
-  /**
-   * Creates a channel with Broadcast and Presence.
-   * Activated when vsndate query param is present in the WebSocket URL.
-   */
-  channel(name: string, opts: { selfBroadcast: boolean; [key: string]: any }): RealtimeChannel {
-    const userToken = this.auth.session()?.access_token ?? this.supabaseKey
-
-    if (!this.realtime.isConnected()) {
-      this.realtime.connect()
-    }
-
-    return this.realtime.channel(name, { ...opts, user_token: userToken }) as RealtimeChannel
-  }
-
-  /**
-   * Closes and removes all subscriptions and returns a list of removed
-   * subscriptions and their errors.
-   */
-  async removeAllSubscriptions(): Promise<
-    { data: { subscription: RealtimeSubscription }; error: Error | null }[]
-  > {
-    const allSubs: RealtimeSubscription[] = this.getSubscriptions().slice()
-    const allSubPromises = allSubs.map((sub) => this.removeSubscription(sub))
-    const allRemovedSubs = await Promise.all(allSubPromises)
-
-    return allRemovedSubs.map(({ error }, i) => {
-      return {
-        data: { subscription: allSubs[i] },
-        error,
-      }
-    })
-  }
-
-  /**
-   * Closes and removes a channel and returns the number of open channels.
-   *
-   * @param channel The channel you want to close and remove.
-   */
-  async removeChannel(
-    channel: RealtimeChannel
-  ): Promise<{ data: { openChannels: number }; error: Error | null }> {
-    const { error } = await this._closeSubscription(channel)
-    const allChans: RealtimeSubscription[] = this.getSubscriptions()
-    const openChanCount = allChans.filter((chan) => chan.isJoined()).length
-
-    if (allChans.length === 0) await this.realtime.disconnect()
-
-    return { data: { openChannels: openChanCount }, error }
-  }
-
-  /**
-   * Closes and removes a subscription and returns the number of open subscriptions.
-   *
-   * @param subscription The subscription you want to close and remove.
-   */
-  async removeSubscription(
-    subscription: RealtimeSubscription
-  ): Promise<{ data: { openSubscriptions: number }; error: Error | null }> {
-    const { error } = await this._closeSubscription(subscription)
-    const allSubs: RealtimeSubscription[] = this.getSubscriptions()
-    const openSubCount = allSubs.filter((chan) => chan.isJoined()).length
-
-    if (allSubs.length === 0) await this.realtime.disconnect()
-
-    return { data: { openSubscriptions: openSubCount }, error }
-  }
-
-  private async _closeSubscription(
-    subscription: RealtimeSubscription | RealtimeChannel
-  ): Promise<{ error: Error | null }> {
-    let error = null
-
-    if (!subscription.isClosed()) {
-      const { error: unsubError } = await this._unsubscribeSubscription(subscription)
-      error = unsubError
-    }
-
-    this.realtime.remove(subscription)
-
-    return { error }
-  }
-
-  private _unsubscribeSubscription(
-    subscription: RealtimeSubscription | RealtimeChannel
-  ): Promise<{ error: Error | null }> {
-    return new Promise((resolve) => {
-      subscription
-        .unsubscribe()
-        .receive('ok', () => resolve({ error: null }))
-        .receive('error', (error: Error) => resolve({ error }))
-        .receive('timeout', () => resolve({ error: new Error('timed out') }))
-    })
-  }
-
-  /**
-   * Returns an array of all your subscriptions.
-   */
-  getSubscriptions(): RealtimeSubscription[] {
-    return this.realtime.channels as RealtimeSubscription[]
-  }
-
   private _initSupabaseAuthClient({
     autoRefreshToken,
     persistSession,
@@ -285,13 +167,6 @@ export default class SupabaseClient {
       fetch,
       cookieOptions,
       multiTab,
-    })
-  }
-
-  private _initRealtimeClient(options?: RealtimeClientOptions) {
-    return new RealtimeClient(this.realtimeUrl, {
-      ...options,
-      params: { ...options?.params, apikey: this.supabaseKey },
     })
   }
 
@@ -356,7 +231,6 @@ export default class SupabaseClient {
       this.changedAccessToken !== token
     ) {
       // Token has changed
-      this.realtime.setAuth(token!)
       // Ideally we should call this.auth.recoverSession() - need to make public
       // to trigger a "SIGNED_IN" event on this client.
       if (source == 'STORAGE') this.auth.setAuth(token!)
@@ -364,7 +238,6 @@ export default class SupabaseClient {
       this.changedAccessToken = token
     } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
       // Token is removed
-      this.realtime.setAuth(this.supabaseKey)
       if (source == 'STORAGE') this.auth.signOut()
     }
   }

@@ -1,5 +1,4 @@
 import { GoTrueClient } from '@supabase/gotrue-js'
-import { RealtimeClientOptions } from '@supabase/realtime-js'
 
 type GoTrueClientOptions = ConstructorParameters<typeof GoTrueClient>[0]
 
@@ -40,11 +39,6 @@ export type SupabaseClientOptions = {
   localStorage?: SupabaseAuthClientOptions['localStorage']
 
   /**
-   * Options passed to the realtime-js instance
-   */
-  realtime?: RealtimeClientOptions
-
-  /**
    * A custom `fetch` implementation.
    */
   fetch?: Fetch
@@ -58,18 +52,6 @@ export type SupabaseClientOptions = {
    * Options passed to the gotrue-js instance
    */
   cookieOptions?: SupabaseAuthClientOptions['cookieOptions']
-}
-
-export type SupabaseRealtimePayload<T> = {
-  commit_timestamp: string
-  eventType: 'INSERT' | 'UPDATE' | 'DELETE'
-  schema: string
-  table: string
-  /** The new record. Present for 'INSERT' and 'UPDATE' events. */
-  new: T
-  /** The previous record. Present for 'UPDATE' and 'DELETE' events. */
-  old: T
-  errors: string[] | null
 }
 
 export type SupabaseEventTypes = 'INSERT' | 'UPDATE' | 'DELETE' | '*'

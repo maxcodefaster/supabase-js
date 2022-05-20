@@ -1,5 +1,5 @@
 import SupabaseClient from './SupabaseClient'
-import { SupabaseClientOptions, SupabaseRealtimePayload } from './lib/types'
+import { SupabaseClientOptions } from './lib/types'
 import { User as AuthUser, Session as AuthSession } from '@supabase/gotrue-js'
 export * from '@supabase/gotrue-js'
 export {
@@ -8,7 +8,6 @@ export {
   PostgrestMaybeSingleResponse,
   PostgrestError,
 } from '@supabase/postgrest-js'
-export * from '@supabase/realtime-js'
 
 /**
  * Creates a new Supabase Client.
@@ -21,11 +20,4 @@ const createClient = (
   return new SupabaseClient(supabaseUrl, supabaseKey, options)
 }
 
-export {
-  createClient,
-  SupabaseClient,
-  SupabaseClientOptions,
-  SupabaseRealtimePayload,
-  AuthUser,
-  AuthSession,
-}
+export { createClient, SupabaseClient, SupabaseClientOptions, AuthUser, AuthSession }
